@@ -2,6 +2,7 @@
  * Spotify OAuth 2.0 with PKCE (no client secret).
  * Safe for frontend-only apps: we never use a client secret.
  * Requires VITE_SPOTIFY_CLIENT_ID and VITE_SPOTIFY_REDIRECT_URI in env.
+ * For GitHub Pages use e.g. https://<username>.github.io/pulsemix/ as redirect URI.
  */
 
 const SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize';

@@ -1,5 +1,5 @@
 /**
- * PulseMix music types
+ * PulseMix music types.
  * Unified types for Spotify and SoundCloud tracks and player state.
  */
 
