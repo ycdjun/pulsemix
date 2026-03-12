@@ -1,46 +1,38 @@
 import type { PlaylistTrack } from '../types/music';
 
 interface PlaylistPanelProps {
-  tracks: PlaylistTrack[];
-  currentTrack: PlaylistTrack | null;
-  onSelect: (track: PlaylistTrack) => void;
+  playlist: PlaylistTrack[];
+  onPlay: (track: PlaylistTrack) => void;
   onRemove: (track: PlaylistTrack) => void;
   onClear: () => void;
 }
 
-export function PlaylistPanel({ tracks, currentTrack, onSelect, onRemove, onClear }: PlaylistPanelProps) {
+export function PlaylistPanel({ playlist, onPlay, onRemove, onClear }: PlaylistPanelProps) {
   return (
-    <aside className="playlist-column panel">
-      <div className="playlist-header">
-        <div>
-          <h2>Mixed playlist</h2>
-          <p className="muted">{tracks.length} saved tracks</p>
-        </div>
-        <button className="button button-secondary" onClick={onClear} disabled={!tracks.length}>
+    <section className="panel playlist-panel">
+      <div className="panel-header">
+        <h2>Playlist</h2>
+        <button className="button ghost" onClick={onClear} disabled={!playlist.length}>
           Clear
         </button>
       </div>
 
+      {!playlist.length ? <p className="muted">Add tracks from Spotify or SoundCloud.</p> : null}
+
       <div className="playlist-list">
-        {tracks.length === 0 ? (
-          <p className="muted">Add tracks from Spotify or SoundCloud to build your playlist.</p>
-        ) : (
-          tracks.map((track) => {
-            const isActive = currentTrack?.provider === track.provider && currentTrack.id === track.id;
-            return (
-              <div key={`${track.provider}-${track.id}`} className={`playlist-item ${isActive ? 'playlist-item-active' : ''}`}>
-                <button className="playlist-select" onClick={() => onSelect(track)}>
-                  <strong>{track.title}</strong>
-                  <span>{track.artist}</span>
-                </button>
-                <button className="playlist-remove" onClick={() => onRemove(track)} aria-label={`Remove ${track.title}`}>
-                  ×
-                </button>
-              </div>
-            );
-          })
-        )}
+        {playlist.map((track) => (
+          <div key={`${track.provider}:${track.id}`} className="playlist-item">
+            <div>
+              <strong>{track.title}</strong>
+              <div className="tiny">{track.artist} · {track.provider}</div>
+            </div>
+            <div className="track-actions">
+              <button className="button" onClick={() => onPlay(track)}>Play</button>
+              <button className="button ghost" onClick={() => onRemove(track)}>Remove</button>
+            </div>
+          </div>
+        ))}
       </div>
-    </aside>
+    </section>
   );
 }

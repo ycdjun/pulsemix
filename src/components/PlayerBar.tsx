@@ -2,22 +2,27 @@ import type { PlaylistTrack } from '../types/music';
 
 interface PlayerBarProps {
   currentTrack: PlaylistTrack | null;
-  isPlaying: boolean;
-  onTogglePlay: () => void;
+  message?: string | null;
+  onPrev?: () => void;
+  onNext?: () => void;
+  onToggle?: () => void;
 }
 
-export function PlayerBar({ currentTrack, isPlaying, onTogglePlay }: PlayerBarProps) {
+export function PlayerBar({ currentTrack, message, onPrev, onNext, onToggle }: PlayerBarProps) {
   return (
     <footer className="player-bar">
       <div>
-        <p className="player-label">Now playing</p>
-        <h3>{currentTrack?.title ?? 'Nothing selected yet'}</h3>
-        <p className="muted">{currentTrack ? `${currentTrack.artist} • ${currentTrack.provider}` : 'Pick a track from your playlist.'}</p>
+        <strong>{currentTrack ? currentTrack.title : 'Nothing playing'}</strong>
+        <div className="tiny">
+          {currentTrack ? `${currentTrack.artist} · ${currentTrack.provider}` : 'Choose a track to start playback.'}
+        </div>
       </div>
-
-      <button className="button button-primary" onClick={onTogglePlay} disabled={!currentTrack}>
-        {isPlaying ? 'Pause' : 'Play'}
-      </button>
+      <div className="track-actions">
+        <button className="button ghost" onClick={onPrev}>Prev</button>
+        <button className="button" onClick={onToggle}>Toggle</button>
+        <button className="button ghost" onClick={onNext}>Next</button>
+      </div>
+      {message ? <div className="error">{message}</div> : null}
     </footer>
   );
 }

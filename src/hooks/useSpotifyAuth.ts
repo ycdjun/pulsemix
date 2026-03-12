@@ -1,111 +1,69 @@
-/**
- * Hook to manage Spotify login state and OAuth callback handling.
- * Includes extra debug logging to help diagnose login/player issues.
- */
-
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  exchangeCodeForToken,
-  getCodeFromUrl,
+  beginSpotifyLogin,
+  clearStoredToken,
   getStoredToken,
-  loginToSpotify,
-  logoutSpotify,
+  handleSpotifyRedirectCallback,
+  type StoredSpotifyToken,
 } from '../lib/spotifyAuth';
 
-export function useSpotifyAuth() {
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [isHandlingCallback, setIsHandlingCallback] = useState<boolean>(false);
+export interface SpotifyAuthState {
+  accessToken: string | null;
+  isLoggedIn: boolean;
+  isLoading: boolean;
+  error: string | null;
+  login: () => Promise<void>;
+  logout: () => void;
+  token: StoredSpotifyToken | null;
+}
+
+export function useSpotifyAuth(): SpotifyAuthState {
+  const [token, setToken] = useState<StoredSpotifyToken | null>(() => getStoredToken());
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  const hasHandledCallbackRef = useRef(false);
-
-  const refreshLoginState = useCallback(() => {
-    const token = getStoredToken();
-    setIsLoggedIn(!!token);
-
-    console.log('[Spotify Auth Hook] refreshLoginState', {
-      hasToken: !!token,
-      expiresAt: token?.expires_at ?? null,
-    });
-  }, []);
+  const handledRef = useRef(false);
 
   useEffect(() => {
-    if (hasHandledCallbackRef.current) {
-      return;
-    }
+    if (handledRef.current) return;
+    handledRef.current = true;
 
-    const url = new URL(window.location.href);
-    const callbackError = url.searchParams.get('error');
-    const code = getCodeFromUrl();
-
-    if (!code && !callbackError) {
-      refreshLoginState();
-      return;
-    }
-
-    hasHandledCallbackRef.current = true;
-    setError(null);
-    setIsHandlingCallback(true);
-
-    if (callbackError) {
-      console.error('[Spotify Auth Hook] callback error from Spotify', callbackError);
-      setError(`Spotify login failed: ${callbackError}`);
-      setIsLoggedIn(false);
-      setIsHandlingCallback(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    exchangeCodeForToken(code as string)
-      .then(() => {
-        if (cancelled) return;
-        console.log('[Spotify Auth Hook] callback exchange succeeded');
-        setIsLoggedIn(true);
+    const run = async () => {
+      try {
+        const nextToken = await handleSpotifyRedirectCallback();
+        setToken(nextToken);
         setError(null);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : 'Login failed';
-        console.error('[Spotify Auth Hook] callback exchange failed', err);
-        setError(message);
-        setIsLoggedIn(false);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsHandlingCallback(false);
-        }
-      });
-
-    return () => {
-      cancelled = true
+      } catch (err) {
+        console.error('[Spotify Auth Hook] callback error', err);
+        setError(err instanceof Error ? err.message : 'Spotify login failed.');
+      } finally {
+        setIsLoading(false);
+      }
     };
-  }, [refreshLoginState]);
 
-  const login = useCallback(async () => {
-    try {
-      setError(null);
-      await loginToSpotify();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Login failed';
-      console.error('[Spotify Auth Hook] loginToSpotify failed', err);
-      setError(message);
-    }
+    run();
   }, []);
 
-  const logout = useCallback(() => {
-    console.log('[Spotify Auth Hook] logout');
-    logoutSpotify();
-    setIsLoggedIn(false);
+  const login = async () => {
     setError(null);
-  }, []);
-
-  return {
-    isLoggedIn,
-    isHandlingCallback,
-    error,
-    login,
-    logout,
-    refreshLoginState,
+    await beginSpotifyLogin();
   };
+
+  const logout = () => {
+    clearStoredToken();
+    setToken(null);
+    setError(null);
+  };
+
+  return useMemo(
+    () => ({
+      accessToken: token?.accessToken ?? null,
+      isLoggedIn: !!token?.accessToken,
+      isLoading,
+      error,
+      login,
+      logout,
+      token,
+    }),
+    [token, isLoading, error]
+  );
 }

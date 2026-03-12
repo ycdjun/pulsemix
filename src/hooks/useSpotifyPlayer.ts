@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { startSpotifyPlayback } from '../lib/spotifyApi';
+import {
+  fetchSpotifyAccountDebug,
+  fetchSpotifyDevicesDebug,
+  startSpotifyPlayback,
+} from '../lib/spotifyApi';
+import { getStoredToken } from '../lib/spotifyAuth';
 
 declare global {
   interface Window {
@@ -34,7 +39,10 @@ export function useSpotifyPlayer({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!accessToken) {
+    const stored = getStoredToken();
+    const effectiveToken = accessToken ?? stored?.access_token ?? null;
+
+    if (!effectiveToken) {
       setPlayer(null);
       setDeviceId(null);
       setIsReady(false);
@@ -52,7 +60,9 @@ export function useSpotifyPlayer({
           return;
         }
 
-        const existingScript = document.querySelector('script[data-spotify-sdk="true"]') as HTMLScriptElement | null;
+        const existingScript = document.querySelector(
+          'script[data-spotify-sdk="true"]'
+        ) as HTMLScriptElement | null;
 
         if (existingScript) {
           window.onSpotifyWebPlaybackSDKReady = () => resolve();
@@ -81,22 +91,34 @@ export function useSpotifyPlayer({
         const sdkPlayer = new window.Spotify.Player({
           name: 'PulseMix Web Player',
           getOAuthToken: (cb) => {
-            const tokenFromStorage = localStorage.getItem('spotify_access_token');
+            const tokenFromStorage = getStoredToken()?.access_token ?? null;
+            const finalToken = tokenFromStorage ?? effectiveToken ?? '';
+
             console.log('[Spotify SDK] getOAuthToken called', {
-              hasToken: !!tokenFromStorage,
-              tokenPrefix: tokenFromStorage ? tokenFromStorage.slice(0, 12) : null,
+              hasToken: !!finalToken,
+              tokenPrefix: finalToken ? finalToken.slice(0, 10) : null,
             });
-            cb(tokenFromStorage ?? accessToken ?? '');
+
+            cb(finalToken);
           },
           volume: 0.5,
         });
 
-        sdkPlayer.addListener('ready', ({ device_id }) => {
+        sdkPlayer.addListener('ready', async ({ device_id }) => {
           console.log('[Spotify SDK] ready', { device_id });
+
           if (cancelled) return;
+
           setDeviceId(device_id);
           setIsReady(true);
           setError(null);
+
+          try {
+            await fetchSpotifyAccountDebug();
+            await fetchSpotifyDevicesDebug();
+          } catch {
+            // logs already emitted inside helpers
+          }
         });
 
         sdkPlayer.addListener('not_ready', ({ device_id }) => {
@@ -116,14 +138,32 @@ export function useSpotifyPlayer({
           setError(event?.message ?? 'Spotify player initialization failed.');
         });
 
-        sdkPlayer.addListener('authentication_error', (event) => {
+        sdkPlayer.addListener('authentication_error', async (event) => {
           console.error('[Spotify SDK] authentication_error', event?.message, event);
+          try {
+            await fetchSpotifyAccountDebug();
+          } catch {
+            // logs already emitted inside helpers
+          }
           if (cancelled) return;
           setError(event?.message ?? 'Spotify player authentication failed.');
         });
 
-        sdkPlayer.addListener('account_error', (event) => {
+        sdkPlayer.addListener('account_error', async (event) => {
           console.error('[Spotify SDK] account_error', event?.message, event);
+          try {
+            const me = await fetchSpotifyAccountDebug();
+            const storedToken = getStoredToken();
+
+            console.log('[Spotify Debug] account eligibility snapshot', {
+              spotifyProduct: me?.product ?? null,
+              scope: storedToken?.scope ?? null,
+              tokenPrefix: storedToken?.access_token?.slice(0, 10) ?? null,
+            });
+          } catch {
+            // logs already emitted
+          }
+
           if (cancelled) return;
           setError(event?.message ?? 'Spotify account error.');
         });
@@ -160,7 +200,6 @@ export function useSpotifyPlayer({
 
     return () => {
       cancelled = true;
-
       if (currentPlayer) {
         currentPlayer.disconnect();
       }

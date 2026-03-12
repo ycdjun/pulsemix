@@ -3,38 +3,24 @@ import type { UnifiedTrack } from '../types/music';
 interface TrackCardProps {
   track: UnifiedTrack;
   onAdd: (track: UnifiedTrack) => void;
-  canPlay?: boolean;
+  onPlay: (track: UnifiedTrack) => void;
 }
 
-function formatDuration(durationMs?: number): string {
-  if (!durationMs) return '—';
-  const totalSeconds = Math.floor(durationMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-export function TrackCard({ track, onAdd, canPlay = true }: TrackCardProps) {
+export function TrackCard({ track, onAdd, onPlay }: TrackCardProps) {
   return (
-    <article className="track-card">
-      <div className="track-artwork">
-        {track.artworkUrl ? <img src={track.artworkUrl} alt={track.title} /> : <span>{track.provider === 'spotify' ? 'S' : 'C'}</span>}
+    <div className="track-card">
+      <div className="artwork">
+        {track.artworkUrl ? <img src={track.artworkUrl} alt={track.title} /> : <span>{track.provider[0].toUpperCase()}</span>}
       </div>
-
-      <div className="track-copy">
-        <div className="track-topline">
-          <h3>{track.title}</h3>
-          <span className={`provider-badge provider-${track.provider}`}>{track.provider}</span>
-        </div>
-        <p>{track.artist}</p>
-        <small>
-          {track.album ?? 'Single'} • {formatDuration(track.durationMs)}
-        </small>
+      <div className="track-meta">
+        <strong>{track.title}</strong>
+        <span>{track.artist}</span>
+        <span className="tiny">{track.provider === 'spotify' ? 'Spotify' : 'SoundCloud'}</span>
       </div>
-
-      <button className="button button-secondary" onClick={() => onAdd(track)} disabled={!canPlay}>
-        Add
-      </button>
-    </article>
+      <div className="track-actions">
+        <button className="button" onClick={() => onPlay(track)}>Play</button>
+        <button className="button ghost" onClick={() => onAdd(track)}>Add</button>
+      </div>
+    </div>
   );
 }

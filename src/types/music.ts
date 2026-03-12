@@ -10,7 +10,6 @@ export interface UnifiedTrack {
   durationMs?: number;
   spotifyUri?: string;
   soundcloudUrl?: string;
-  embedUrl?: string;
 }
 
 export type PlaylistTrack = UnifiedTrack;

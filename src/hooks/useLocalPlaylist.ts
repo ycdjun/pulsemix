@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { clearPlaylist as clearPlaylistStorage, loadPlaylist, savePlaylist } from '../lib/storage';
+import { useEffect, useState } from 'react';
+import { clearPlaylist, loadPlaylist, savePlaylist } from '../lib/storage';
 import type { PlaylistTrack } from '../types/music';
 
-function getTrackKey(track: Pick<PlaylistTrack, 'provider' | 'id'>): string {
+function trackKey(track: PlaylistTrack): string {
   return `${track.provider}:${track.id}`;
 }
 
@@ -13,28 +13,27 @@ export function useLocalPlaylist() {
     savePlaylist(playlist);
   }, [playlist]);
 
-  const playlistKeys = useMemo(() => new Set(playlist.map(getTrackKey)), [playlist]);
+  const addTrack = (track: PlaylistTrack) => {
+    setPlaylist((current) => {
+      const exists = current.some((item) => trackKey(item) === trackKey(track));
+      return exists ? current : [...current, track];
+    });
+  };
 
-  function addTrack(track: PlaylistTrack) {
-    const key = getTrackKey(track);
-    if (playlistKeys.has(key)) return;
-    setPlaylist((current) => [...current, track]);
-  }
+  const removeTrack = (track: PlaylistTrack) => {
+    setPlaylist((current) => current.filter((item) => trackKey(item) !== trackKey(track)));
+  };
 
-  function removeTrack(track: Pick<PlaylistTrack, 'provider' | 'id'>) {
-    const keyToRemove = getTrackKey(track);
-    setPlaylist((current) => current.filter((item) => getTrackKey(item) !== keyToRemove));
-  }
-
-  function clearAll() {
+  const clearAll = () => {
     setPlaylist([]);
-    clearPlaylistStorage();
-  }
+    clearPlaylist();
+  };
 
   return {
     playlist,
     addTrack,
     removeTrack,
     clearAll,
+    setPlaylist,
   };
 }

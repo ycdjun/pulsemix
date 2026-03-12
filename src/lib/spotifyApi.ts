@@ -1,9 +1,10 @@
 import { UnifiedTrack } from '../types/music';
+import { getStoredToken } from './spotifyAuth';
 
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
 function getStoredAccessToken(): string | null {
-  return localStorage.getItem('spotify_access_token');
+  return getStoredToken()?.access_token ?? null;
 }
 
 async function spotifyFetch(path: string, init: RequestInit = {}) {
@@ -35,9 +36,7 @@ async function spotifyFetch(path: string, init: RequestInit = {}) {
 }
 
 export async function searchSpotifyTracks(query: string): Promise<UnifiedTrack[]> {
-  if (!query.trim()) {
-    return [];
-  }
+  if (!query.trim()) return [];
 
   const encodedQuery = encodeURIComponent(query.trim());
   const data = await spotifyFetch(`/search?q=${encodedQuery}&type=track&limit=12`);
@@ -54,20 +53,13 @@ export async function searchSpotifyTracks(query: string): Promise<UnifiedTrack[]
   }));
 }
 
-/**
- * The Spotify Web Playback SDK provides a browser device. Starting playback of a URI
- * happens through the Web API and targets that device_id.
- */
 export async function startSpotifyPlayback(params: {
   deviceId: string;
   trackUri: string;
 }) {
   const { deviceId, trackUri } = params;
 
-  console.log('[Spotify API] startSpotifyPlayback()', {
-    deviceId,
-    trackUri,
-  });
+  console.log('[Spotify API] startSpotifyPlayback()', { deviceId, trackUri });
 
   await spotifyFetch(`/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
     method: 'PUT',
@@ -75,4 +67,33 @@ export async function startSpotifyPlayback(params: {
       uris: [trackUri],
     }),
   });
+}
+
+export async function fetchSpotifyAccountDebug() {
+  try {
+    const me = await spotifyFetch('/me');
+    console.log('[Spotify Debug] /me', {
+      id: me?.id ?? null,
+      display_name: me?.display_name ?? null,
+      email: me?.email ?? null,
+      product: me?.product ?? null,
+      country: me?.country ?? null,
+    });
+
+    return me;
+  } catch (error) {
+    console.error('[Spotify Debug] /me failed', error);
+    throw error;
+  }
+}
+
+export async function fetchSpotifyDevicesDebug() {
+  try {
+    const data = await spotifyFetch('/me/player/devices');
+    console.log('[Spotify Debug] /me/player/devices', data);
+    return data;
+  } catch (error) {
+    console.error('[Spotify Debug] /me/player/devices failed', error);
+    throw error;
+  }
 }

@@ -1,31 +1,24 @@
-import type { PlaylistTrack } from '../types/music';
-
 interface SoundCloudPlayerProps {
-  track: PlaylistTrack | null;
+  url: string | null | undefined;
 }
 
-export function SoundCloudPlayer({ track }: SoundCloudPlayerProps) {
-  if (!track || track.provider !== 'soundcloud' || !track.embedUrl) {
-    return (
-      <div className="panel embed-panel">
-        <h2>SoundCloud player</h2>
-        <p className="muted">Select a SoundCloud track in the playlist to render the embed player here.</p>
-      </div>
-    );
-  }
+export function SoundCloudPlayer({ url }: SoundCloudPlayerProps) {
+  if (!url) return null;
+
+  const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%230f172a&auto_play=true`;
 
   return (
-    <div className="panel embed-panel">
-      <h2>SoundCloud player</h2>
+    <section className="panel">
+      <h2>SoundCloud Player</h2>
       <iframe
-        title={`SoundCloud player for ${track.title}`}
+        title="SoundCloud player"
         width="100%"
         height="166"
         scrolling="no"
         frameBorder="no"
         allow="autoplay"
-        src={track.embedUrl}
+        src={embedUrl}
       />
-    </div>
+    </section>
   );
 }
