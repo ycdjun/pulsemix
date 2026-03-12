@@ -1,53 +1,47 @@
-/**
- * Left sidebar: app branding, Spotify login/logout, status.
- */
-
-import type { ReactNode } from 'react';
-
 interface SidebarProps {
-  isSpotifyLoggedIn: boolean;
-  isHandlingCallback: boolean;
-  spotifyError: string | null;
-  onLogin: () => void;
+  isLoggedIn: boolean;
+  isLoggingIn: boolean;
+  authError: string | null;
+  onLogin: () => void | Promise<void>;
   onLogout: () => void;
-  children?: ReactNode;
 }
 
-export function Sidebar({
-  isSpotifyLoggedIn,
-  isHandlingCallback,
-  spotifyError,
-  onLogin,
-  onLogout,
-  children,
-}: SidebarProps) {
+export function Sidebar({ isLoggedIn, isLoggingIn, authError, onLogin, onLogout }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">
-        <h1 className="sidebar-title">PulseMix</h1>
-        <p className="sidebar-tagline">Mix Spotify &amp; SoundCloud</p>
+      <div className="brand-card">
+        <div className="brand-logo">P</div>
+        <div>
+          <h1>PulseMix</h1>
+          <p>Spotify + SoundCloud playlist builder</p>
+        </div>
       </div>
 
-      <div className="sidebar-spotify">
-        {isSpotifyLoggedIn ? (
-          <button type="button" className="btn btn-secondary" onClick={onLogout} disabled={isHandlingCallback}>
-            Log out (Spotify)
+      <div className="panel">
+        <h2>Spotify account</h2>
+        <p className="muted">Log in with Spotify to search tracks and use the Web Playback SDK.</p>
+
+        {isLoggedIn ? (
+          <button className="button button-secondary" onClick={onLogout}>
+            Log out
           </button>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={onLogin} disabled={isHandlingCallback}>
-            {isHandlingCallback ? 'Logging in…' : 'Log in with Spotify'}
+          <button className="button button-primary" onClick={onLogin} disabled={isLoggingIn}>
+            {isLoggingIn ? 'Redirecting…' : 'Log in with Spotify'}
           </button>
         )}
+
+        {authError ? <p className="error-text">{authError}</p> : null}
       </div>
 
-      <div className="sidebar-status">
-        {spotifyError && <p className="sidebar-error">{spotifyError}</p>}
-        {isSpotifyLoggedIn && !spotifyError && (
-          <p className="sidebar-status-text">Spotify connected</p>
-        )}
+      <div className="panel">
+        <h2>How this demo works</h2>
+        <ul className="bullet-list muted">
+          <li>Spotify tracks come from live search after login.</li>
+          <li>SoundCloud tracks come from public sample embeds.</li>
+          <li>One playlist can hold both providers together.</li>
+        </ul>
       </div>
-
-      {children}
     </aside>
   );
 }

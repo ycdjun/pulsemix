@@ -1,56 +1,36 @@
-/**
- * Search input and provider filter for the main content area.
- */
-
-import type { MusicProvider } from '../types/music';
-
 interface SearchBarProps {
-  query: string;
-  onQueryChange: (value: string) => void;
-  providerFilter: MusicProvider | 'all';
-  onProviderFilterChange: (value: MusicProvider | 'all') => void;
+  value: string;
+  onChange: (value: string) => void;
   onSearch: () => void;
+  isLoggedIn: boolean;
   isSearching: boolean;
-  spotifyLoggedIn: boolean;
 }
 
-export function SearchBar({
-  query,
-  onQueryChange,
-  providerFilter,
-  onProviderFilterChange,
-  onSearch,
-  isSearching,
-  spotifyLoggedIn,
-}: SearchBarProps) {
+export function SearchBar({ value, onChange, onSearch, isLoggedIn, isSearching }: SearchBarProps) {
   return (
-    <div className="search-bar">
-      <input
-        type="search"
-        className="search-input"
-        placeholder={spotifyLoggedIn ? 'Search Spotify…' : 'Log in to search Spotify'}
-        value={query}
-        onChange={(e) => onQueryChange(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && onSearch()}
-        disabled={!spotifyLoggedIn}
-      />
-      <select
-        className="search-filter"
-        value={providerFilter}
-        onChange={(e) => onProviderFilterChange(e.target.value as MusicProvider | 'all')}
-      >
-        <option value="all">All</option>
-        <option value="spotify">Spotify</option>
-        <option value="soundcloud">SoundCloud</option>
-      </select>
-      <button
-        type="button"
-        className="btn btn-primary"
-        onClick={onSearch}
-        disabled={!spotifyLoggedIn || isSearching}
-      >
-        {isSearching ? 'Searching…' : 'Search'}
-      </button>
+    <div className="search-row panel">
+      <div className="search-copy">
+        <h2>Search Spotify</h2>
+        <p className="muted">SoundCloud samples are always available. Spotify search unlocks after login.</p>
+      </div>
+
+      <div className="search-controls">
+        <input
+          className="search-input"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={isLoggedIn ? 'Search a song or artist on Spotify' : 'Log in with Spotify to search'}
+          disabled={!isLoggedIn || isSearching}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && isLoggedIn && !isSearching) {
+              onSearch();
+            }
+          }}
+        />
+        <button className="button button-primary" onClick={onSearch} disabled={!isLoggedIn || isSearching}>
+          {isSearching ? 'Searching…' : 'Search'}
+        </button>
+      </div>
     </div>
   );
 }

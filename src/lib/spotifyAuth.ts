@@ -1,12 +1,12 @@
 /**
- * Spotify OAuth 2.0 with PKCE (no client secret).
- * Safe for frontend-only apps: we never use a client secret.
- * Requires VITE_SPOTIFY_CLIENT_ID and VITE_SPOTIFY_REDIRECT_URI in env.
- * For GitHub Pages use e.g. https://<username>.github.io/pulsemix/ as redirect URI.
+ * Spotify OAuth 2.0 + PKCE helpers for a frontend-only app.
+ * This version uses localStorage for the PKCE verifier and adds
+ * stronger debug logging so auth issues are easier to diagnose.
  */
 
 const SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
+
 const SCOPES = [
   'user-modify-playback-state',
   'user-read-playback-state',
@@ -27,46 +27,102 @@ export interface SpotifyTokenData {
   scope?: string;
 }
 
-/** Generate a cryptographically random code verifier (43–128 chars for PKCE). */
-function generateCodeVerifier(): string {
-  const array = new Uint8Array(32);
-  crypto.getRandomValues(array);
-  return base64UrlEncode(array);
+export interface StoredToken extends SpotifyTokenData {
+  expires_at: number;
 }
 
-/** Base64url encode (no +/-, no padding per RFC 7636). */
 function base64UrlEncode(buffer: Uint8Array): string {
   const base64 = btoa(String.fromCharCode(...buffer));
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/**
- * Compute code challenge = base64url(SHA-256(verifier)).
- * Uses Web Crypto API (browser-native).
- */
-async function generateCodeChallenge(verifier: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return base64UrlEncode(new Uint8Array(hash));
+function generateCodeVerifier(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
 }
 
-/**
- * Start login: generate PKCE pair, store verifier, redirect to Spotify.
- * Call this when user clicks "Log in with Spotify".
- */
+async function generateCodeChallenge(verifier: string): Promise<string> {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function persistToken(data: SpotifyTokenData): void {
+  const withExpiry: StoredToken = {
+    ...data,
+    expires_at: Date.now() + data.expires_in * 1000,
+  };
+  localStorage.setItem(STORAGE_KEY_TOKEN, JSON.stringify(withExpiry));
+}
+
+export function getStoredToken(): StoredToken | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_TOKEN);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as StoredToken;
+    if (!parsed.expires_at) return null;
+
+    // Treat token as expired a minute early to avoid edge cases.
+    if (Date.now() >= parsed.expires_at - 60_000) {
+      console.warn('[Spotify Auth] stored token is expired or near expiry');
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error('[Spotify Auth] failed to parse stored token', error);
+    return null;
+  }
+}
+
+export function logoutSpotify(): void {
+  localStorage.removeItem(STORAGE_KEY_TOKEN);
+  localStorage.removeItem(STORAGE_KEY_VERIFIER);
+}
+
+export function getCodeFromUrl(): string | null {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('code');
+
+  if (code) {
+    // Remove one-time auth params immediately to avoid replay on refresh.
+    url.searchParams.delete('code');
+    url.searchParams.delete('state');
+    url.searchParams.delete('error');
+    window.history.replaceState({}, document.title, url.pathname + url.search);
+    return code;
+  }
+
+  return null;
+}
+
 export async function loginToSpotify(): Promise<void> {
   const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
   const redirectUri = import.meta.env.VITE_SPOTIFY_REDIRECT_URI;
 
   if (!clientId || !redirectUri) {
-    throw new Error('Missing VITE_SPOTIFY_CLIENT_ID or VITE_SPOTIFY_REDIRECT_URI');
+    throw new Error('Missing VITE_SPOTIFY_CLIENT_ID or VITE_SPOTIFY_REDIRECT_URI.');
+  }
+
+  if (window.location.origin.includes('localhost') && redirectUri.includes('127.0.0.1')) {
+    throw new Error(
+      'Origin mismatch: open the app at http://127.0.0.1:5173/ instead of localhost so PKCE storage survives the redirect.'
+    );
   }
 
   const verifier = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
 
-  sessionStorage.setItem(STORAGE_KEY_VERIFIER, verifier);
+  localStorage.setItem(STORAGE_KEY_VERIFIER, verifier);
+
+  console.log('[Spotify Auth] starting login', {
+    clientIdPresent: !!clientId,
+    redirectUri,
+    currentOrigin: window.location.origin,
+    verifierLength: verifier.length,
+  });
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -80,92 +136,58 @@ export async function loginToSpotify(): Promise<void> {
   window.location.href = `${SPOTIFY_AUTH_URL}?${params.toString()}`;
 }
 
-/**
- * After redirect, Spotify sends us ?code=... (and maybe state). We exchange
- * the code for tokens using the code_verifier. No client secret needed.
- * CORS: Spotify token endpoint supports browser requests for PKCE flow.
- */
 export async function exchangeCodeForToken(code: string): Promise<SpotifyTokenData> {
   const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
   const redirectUri = import.meta.env.VITE_SPOTIFY_REDIRECT_URI;
-  const verifier = sessionStorage.getItem(STORAGE_KEY_VERIFIER);
+  const verifier = localStorage.getItem(STORAGE_KEY_VERIFIER);
+
+  console.log('[Spotify Auth] exchanging code', {
+    codePresent: !!code,
+    clientIdPresent: !!clientId,
+    redirectUri,
+    verifierPresent: !!verifier,
+    currentOrigin: window.location.origin,
+  });
 
   if (!clientId || !redirectUri || !verifier) {
-    throw new Error('Missing config or code verifier (e.g. session expired)');
+    throw new Error('Missing Spotify PKCE verifier or client id. Check .env and restart the dev server.');
   }
 
   const body = new URLSearchParams({
+    client_id: clientId,
     grant_type: 'authorization_code',
     code,
     redirect_uri: redirectUri,
     code_verifier: verifier,
   });
 
-  const res = await fetch(SPOTIFY_TOKEN_URL, {
+  const response = await fetch(SPOTIFY_TOKEN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
     body: body.toString(),
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token exchange failed: ${res.status} ${text}`);
+  if (!response.ok) {
+    const text = await response.text();
+    console.error('[Spotify Auth] token exchange failed', {
+      status: response.status,
+      body: text,
+    });
+    throw new Error(`Unable to exchange Spotify authorization code for a token. ${text}`);
   }
 
-  const data = (await res.json()) as SpotifyTokenData;
-  sessionStorage.removeItem(STORAGE_KEY_VERIFIER);
+  const data = (await response.json()) as SpotifyTokenData;
+
+  console.log('[Spotify Auth] token exchange success', {
+    hasAccessToken: !!data.access_token,
+    hasRefreshToken: !!data.refresh_token,
+    expiresIn: data.expires_in,
+    scope: data.scope,
+  });
+
+  localStorage.removeItem(STORAGE_KEY_VERIFIER);
   persistToken(data);
   return data;
-}
-
-function persistToken(data: SpotifyTokenData): void {
-  const withTimestamp = {
-    ...data,
-    expires_at: Date.now() + data.expires_in * 1000,
-  };
-  localStorage.setItem(STORAGE_KEY_TOKEN, JSON.stringify(withTimestamp));
-}
-
-export interface StoredToken extends SpotifyTokenData {
-  expires_at: number;
-}
-
-/** Get token from storage if still valid. Caller can use this for API calls. */
-export function getStoredToken(): StoredToken | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_TOKEN);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredToken;
-    // Consider expired 60s before actual expiry to avoid edge cases
-    if (parsed.expires_at && Date.now() < parsed.expires_at - 60_000) {
-      return parsed;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** Clear token and verifier (logout). */
-export function logoutSpotify(): void {
-  localStorage.removeItem(STORAGE_KEY_TOKEN);
-  sessionStorage.removeItem(STORAGE_KEY_VERIFIER);
-}
-
-/**
- * Parse the authorization code from the current URL (after redirect).
- * Returns null if no code present.
- */
-export function getCodeFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  if (code) {
-    // Optional: clean URL so user doesn't see the code in address bar
-    const url = new URL(window.location.href);
-    url.searchParams.delete('code');
-    url.searchParams.delete('state');
-    window.history.replaceState({}, '', url.pathname + url.search);
-    return code;
-  }
-  return null;
 }

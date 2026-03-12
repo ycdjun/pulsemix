@@ -1,45 +1,40 @@
-/**
- * Single track result card: artwork, title, artist, add button.
- */
-
 import type { UnifiedTrack } from '../types/music';
 
 interface TrackCardProps {
   track: UnifiedTrack;
   onAdd: (track: UnifiedTrack) => void;
-  /** Optional: show a "in playlist" state and disable add */
-  isInPlaylist?: boolean;
+  canPlay?: boolean;
 }
 
-export function TrackCard({ track, onAdd, isInPlaylist }: TrackCardProps) {
+function formatDuration(durationMs?: number): string {
+  if (!durationMs) return '—';
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function TrackCard({ track, onAdd, canPlay = true }: TrackCardProps) {
   return (
-    <div className="track-card">
-      <div className="track-card-artwork">
-        {track.artworkUrl ? (
-          <img src={track.artworkUrl} alt="" />
-        ) : (
-          <div className="track-card-artwork-placeholder" />
-        )}
+    <article className="track-card">
+      <div className="track-artwork">
+        {track.artworkUrl ? <img src={track.artworkUrl} alt={track.title} /> : <span>{track.provider === 'spotify' ? 'S' : 'C'}</span>}
       </div>
-      <div className="track-card-info">
-        <span className="track-card-provider" data-provider={track.provider}>
-          {track.provider}
-        </span>
-        <h3 className="track-card-title">{track.title}</h3>
-        <p className="track-card-artist">{track.artist}</p>
-        {track.album && <p className="track-card-album">{track.album}</p>}
+
+      <div className="track-copy">
+        <div className="track-topline">
+          <h3>{track.title}</h3>
+          <span className={`provider-badge provider-${track.provider}`}>{track.provider}</span>
+        </div>
+        <p>{track.artist}</p>
+        <small>
+          {track.album ?? 'Single'} • {formatDuration(track.durationMs)}
+        </small>
       </div>
-      <div className="track-card-actions">
-        <button
-          type="button"
-          className="btn btn-small"
-          onClick={() => onAdd(track)}
-          disabled={isInPlaylist}
-          title={isInPlaylist ? 'Already in playlist' : 'Add to playlist'}
-        >
-          {isInPlaylist ? 'Added' : '+ Add'}
-        </button>
-      </div>
-    </div>
+
+      <button className="button button-secondary" onClick={() => onAdd(track)} disabled={!canPlay}>
+        Add
+      </button>
+    </article>
   );
 }

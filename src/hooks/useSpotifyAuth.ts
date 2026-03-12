@@ -1,71 +1,100 @@
 /**
- * Hook to manage Spotify login state and OAuth callback.
- * On mount, checks URL for ?code= and exchanges it for a token if present.
+ * Hook to manage Spotify login state and OAuth callback handling.
+ * Includes extra debug logging to help diagnose login/player issues.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getCodeFromUrl,
   exchangeCodeForToken,
+  getCodeFromUrl,
   getStoredToken,
   loginToSpotify,
   logoutSpotify,
 } from '../lib/spotifyAuth';
 
 export function useSpotifyAuth() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isHandlingCallback, setIsHandlingCallback] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [isHandlingCallback, setIsHandlingCallback] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const updateLoginState = useCallback(() => {
-    setIsLoggedIn(!!getStoredToken());
+  const hasHandledCallbackRef = useRef(false);
+
+  const refreshLoginState = useCallback(() => {
+    const token = getStoredToken();
+    setIsLoggedIn(!!token);
+
+    console.log('[Spotify Auth Hook] refreshLoginState', {
+      hasToken: !!token,
+      expiresAt: token?.expires_at ?? null,
+    });
   }, []);
 
-  // On mount: if URL has ?code=, we're returning from Spotify — exchange for token
   useEffect(() => {
+    if (hasHandledCallbackRef.current) {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const callbackError = url.searchParams.get('error');
     const code = getCodeFromUrl();
-    if (!code) {
-      updateLoginState();
+
+    if (!code && !callbackError) {
+      refreshLoginState();
+      return;
+    }
+
+    hasHandledCallbackRef.current = true;
+    setError(null);
+    setIsHandlingCallback(true);
+
+    if (callbackError) {
+      console.error('[Spotify Auth Hook] callback error from Spotify', callbackError);
+      setError(`Spotify login failed: ${callbackError}`);
+      setIsLoggedIn(false);
+      setIsHandlingCallback(false);
       return;
     }
 
     let cancelled = false;
-    setError(null);
-    setIsHandlingCallback(true);
 
-    exchangeCodeForToken(code)
+    exchangeCodeForToken(code as string)
       .then(() => {
-        if (!cancelled) {
-          setIsLoggedIn(true);
-          setError(null);
-        }
+        if (cancelled) return;
+        console.log('[Spotify Auth Hook] callback exchange succeeded');
+        setIsLoggedIn(true);
+        setError(null);
       })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Login failed');
-          setIsLoggedIn(false);
-        }
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Login failed';
+        console.error('[Spotify Auth Hook] callback exchange failed', err);
+        setError(message);
+        setIsLoggedIn(false);
       })
       .finally(() => {
-        if (!cancelled) setIsHandlingCallback(false);
+        if (!cancelled) {
+          setIsHandlingCallback(false);
+        }
       });
 
     return () => {
-      cancelled = true;
+      cancelled = true
     };
-  }, [updateLoginState]);
+  }, [refreshLoginState]);
 
   const login = useCallback(async () => {
-    setError(null);
     try {
+      setError(null);
       await loginToSpotify();
-      // Redirect happens; no need to update state here
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Login failed';
+      console.error('[Spotify Auth Hook] loginToSpotify failed', err);
+      setError(message);
     }
   }, []);
 
   const logout = useCallback(() => {
+    console.log('[Spotify Auth Hook] logout');
     logoutSpotify();
     setIsLoggedIn(false);
     setError(null);
@@ -77,6 +106,6 @@ export function useSpotifyAuth() {
     error,
     login,
     logout,
-    refreshLoginState: updateLoginState,
+    refreshLoginState,
   };
 }

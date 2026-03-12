@@ -1,186 +1,221 @@
-/**
- * Spotify Web Playback SDK integration.
- * Loads the SDK script, creates a player when token is available,
- * and exposes play/pause and play-URI.
- */
-
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { getStoredToken } from '../lib/spotifyAuth';
+import { useCallback, useEffect, useState } from 'react';
+import { startSpotifyPlayback } from '../lib/spotifyApi';
 
 declare global {
   interface Window {
     onSpotifyWebPlaybackSDKReady?: () => void;
-    Spotify?: {
-      Player: new (options: {
-        name: string;
-        getOAuthToken: (cb: (token: string) => void) => void;
-        volume?: number;
-      }) => SpotifyPlayerInstance;
-    };
+    Spotify?: typeof Spotify;
   }
 }
 
-interface SpotifyPlayerInstance {
-  connect: () => Promise<boolean>;
-  disconnect: () => void;
-  addListener: (event: string, cb: (state?: unknown) => void) => void;
-  removeListener: (event: string, cb?: (state?: unknown) => void) => void;
-  getCurrentState: () => Promise<{ position: number; duration: number; paused: boolean } | null>;
-  resume: () => Promise<void>;
+type UseSpotifyPlayerParams = {
+  accessToken: string | null;
+};
+
+type UseSpotifyPlayerResult = {
+  player: Spotify.Player | null;
+  deviceId: string | null;
+  isReady: boolean;
+  error: string | null;
+  playUri: (trackUri: string) => Promise<void>;
   pause: () => Promise<void>;
-  seek: (positionMs: number) => Promise<void>;
-  getVolume: () => Promise<number>;
-  setVolume: (volume: number) => Promise<void>;
-  activateElement: () => Promise<void>;
-}
+  resume: () => Promise<void>;
+  togglePlay: () => Promise<void>;
+  nextTrack: () => Promise<void>;
+  previousTrack: () => Promise<void>;
+};
 
-const SCRIPT_URL = 'https://sdk.scdn.co/spotify-player.js';
-
-/** Pass isLoggedIn from useSpotifyAuth so the player (re)initializes after login. */
-export function useSpotifyPlayer(spotifyLoggedIn: boolean) {
-  const [isReady, setIsReady] = useState(false);
+export function useSpotifyPlayer({
+  accessToken,
+}: UseSpotifyPlayerParams): UseSpotifyPlayerResult {
+  const [player, setPlayer] = useState<Spotify.Player | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [playerError, setPlayerError] = useState<string | null>(null);
-  const playerRef = useRef<SpotifyPlayerInstance | null>(null);
+  const [isReady, setIsReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load SDK script once
   useEffect(() => {
-    if (document.querySelector(`script[src="${SCRIPT_URL}"]`)) return;
-
-    const script = document.createElement('script');
-    script.src = SCRIPT_URL;
-    script.async = true;
-    document.body.appendChild(script);
-  }, []);
-
-  // Create and connect player when we have a token (and SDK may load async)
-  useEffect(() => {
-    if (!spotifyLoggedIn) {
-      setIsReady(false);
+    if (!accessToken) {
+      setPlayer(null);
       setDeviceId(null);
+      setIsReady(false);
+      setError(null);
       return;
     }
-    const token = getStoredToken();
-    if (!token) return;
 
     let cancelled = false;
-    let cleanup: (() => void) | null = null;
+    let currentPlayer: Spotify.Player | null = null;
 
-    const init = () => {
-      if (cancelled) return;
-      if (!window.Spotify) {
-        setTimeout(init, 100);
-        return;
-      }
+    const loadSdkScript = () =>
+      new Promise<void>((resolve, reject) => {
+        if (window.Spotify) {
+          resolve();
+          return;
+        }
 
-      const player = new window.Spotify!.Player({
-        name: 'PulseMix Web Player',
-        getOAuthToken: (cb) => cb(token.access_token),
-        volume: 0.8,
+        const existingScript = document.querySelector('script[data-spotify-sdk="true"]') as HTMLScriptElement | null;
+
+        if (existingScript) {
+          window.onSpotifyWebPlaybackSDKReady = () => resolve();
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://sdk.scdn.co/spotify-player.js';
+        script.async = true;
+        script.dataset.spotifySdk = 'true';
+        script.onload = () => {
+          window.onSpotifyWebPlaybackSDKReady = () => resolve();
+        };
+        script.onerror = () => reject(new Error('Failed to load Spotify Web Playback SDK.'));
+        document.body.appendChild(script);
       });
 
-      playerRef.current = player;
+    const initializePlayer = async () => {
+      try {
+        await loadSdkScript();
 
-      const onReady = ({ device_id }: { device_id: string }) => {
-        if (!cancelled) {
+        if (!window.Spotify || cancelled) {
+          return;
+        }
+
+        const sdkPlayer = new window.Spotify.Player({
+          name: 'PulseMix Web Player',
+          getOAuthToken: (cb) => {
+            const tokenFromStorage = localStorage.getItem('spotify_access_token');
+            console.log('[Spotify SDK] getOAuthToken called', {
+              hasToken: !!tokenFromStorage,
+              tokenPrefix: tokenFromStorage ? tokenFromStorage.slice(0, 12) : null,
+            });
+            cb(tokenFromStorage ?? accessToken ?? '');
+          },
+          volume: 0.5,
+        });
+
+        sdkPlayer.addListener('ready', ({ device_id }) => {
+          console.log('[Spotify SDK] ready', { device_id });
+          if (cancelled) return;
           setDeviceId(device_id);
           setIsReady(true);
-          setPlayerError(null);
-        }
-      };
+          setError(null);
+        });
 
-      const onNotReady = () => {
-        if (!cancelled) {
-          setIsReady(false);
+        sdkPlayer.addListener('not_ready', ({ device_id }) => {
+          console.warn('[Spotify SDK] not_ready', { device_id });
+          if (cancelled) return;
           setDeviceId(null);
+          setIsReady(false);
+        });
+
+        sdkPlayer.addListener('player_state_changed', (state) => {
+          console.log('[Spotify SDK] player_state_changed', state);
+        });
+
+        sdkPlayer.addListener('initialization_error', (event) => {
+          console.error('[Spotify SDK] initialization_error', event?.message, event);
+          if (cancelled) return;
+          setError(event?.message ?? 'Spotify player initialization failed.');
+        });
+
+        sdkPlayer.addListener('authentication_error', (event) => {
+          console.error('[Spotify SDK] authentication_error', event?.message, event);
+          if (cancelled) return;
+          setError(event?.message ?? 'Spotify player authentication failed.');
+        });
+
+        sdkPlayer.addListener('account_error', (event) => {
+          console.error('[Spotify SDK] account_error', event?.message, event);
+          if (cancelled) return;
+          setError(event?.message ?? 'Spotify account error.');
+        });
+
+        sdkPlayer.addListener('playback_error', (event) => {
+          console.error('[Spotify SDK] playback_error', event?.message, event);
+          if (cancelled) return;
+          setError(event?.message ?? 'Spotify playback failed.');
+        });
+
+        const connected = await sdkPlayer.connect();
+        console.log('[Spotify SDK] connect() resolved', connected);
+
+        if (cancelled) {
+          await sdkPlayer.disconnect();
+          return;
         }
-      };
 
-      const onPlayerStateChanged = () => {
-        // Could sync state to React here if needed
-      };
+        currentPlayer = sdkPlayer;
+        setPlayer(sdkPlayer);
 
-      player.addListener('ready', onReady);
-      player.addListener('not_ready', onNotReady);
-      player.addListener('player_state_changed', onPlayerStateChanged);
-
-      player.connect().catch((err: unknown) => {
+        if (!connected) {
+          setError('Spotify SDK failed to connect.');
+        }
+      } catch (err) {
+        console.error('[Spotify SDK] setup failed', err);
         if (!cancelled) {
-          setPlayerError(err instanceof Error ? err.message : 'Failed to connect player');
+          setError(err instanceof Error ? err.message : 'Spotify SDK setup failed.');
         }
-      });
-
-      cleanup = () => {
-        player.removeListener('ready', onReady);
-        player.removeListener('not_ready', onNotReady);
-        player.removeListener('player_state_changed', onPlayerStateChanged);
-        player.disconnect();
-        playerRef.current = null;
-        setIsReady(false);
-        setDeviceId(null);
-      };
+      }
     };
 
-    init();
+    initializePlayer();
 
     return () => {
       cancelled = true;
-      if (cleanup) cleanup();
+
+      if (currentPlayer) {
+        currentPlayer.disconnect();
+      }
     };
-  }, [spotifyLoggedIn]); // Re-run when user logs in/out
+  }, [accessToken]);
 
-  /**
-   * Start playback of a Spotify track by URI.
-   * Requires Spotify Web API "play" endpoint — we'll need to call it from the frontend.
-   * The SDK doesn't play by URI directly; we need to call PUT https://api.spotify.com/v1/me/player/play
-   * with body { uris: [uri] }. So we need a small helper that uses the token.
-   */
-  const playSpotifyUri = useCallback(async (uri: string) => {
-    const token = getStoredToken();
-    if (!token || !deviceId) {
-      throw new Error('Spotify player not ready');
-    }
+  const playUri = useCallback(
+    async (trackUri: string) => {
+      if (!deviceId) {
+        throw new Error('Spotify player device is not ready yet.');
+      }
 
-    const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token.access_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ uris: [uri] }),
-    });
-
-    if (!res.ok && res.status !== 204) {
-      const text = await res.text();
-      throw new Error(`Play failed: ${res.status} ${text}`);
-    }
-  }, [deviceId]);
+      await startSpotifyPlayback({
+        deviceId,
+        trackUri,
+      });
+    },
+    [deviceId]
+  );
 
   const pause = useCallback(async () => {
-    const p = playerRef.current;
-    if (!p) return;
-    await p.pause();
-  }, []);
+    if (!player) return;
+    await player.pause();
+  }, [player]);
 
   const resume = useCallback(async () => {
-    const p = playerRef.current;
-    if (!p) return;
-    await p.resume();
-  }, []);
+    if (!player) return;
+    await player.resume();
+  }, [player]);
 
-  const getState = useCallback(async () => {
-    const p = playerRef.current;
-    if (!p) return null;
-    return p.getCurrentState();
-  }, []);
+  const togglePlay = useCallback(async () => {
+    if (!player) return;
+    await player.togglePlay();
+  }, [player]);
+
+  const nextTrack = useCallback(async () => {
+    if (!player) return;
+    await player.nextTrack();
+  }, [player]);
+
+  const previousTrack = useCallback(async () => {
+    if (!player) return;
+    await player.previousTrack();
+  }, [player]);
 
   return {
-    isReady,
+    player,
     deviceId,
-    playerError,
-    playSpotifyUri,
+    isReady,
+    error,
+    playUri,
     pause,
     resume,
-    getState,
+    togglePlay,
+    nextTrack,
+    previousTrack,
   };
 }

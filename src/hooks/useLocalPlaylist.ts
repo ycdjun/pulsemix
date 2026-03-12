@@ -1,56 +1,40 @@
-/**
- * Hook to manage the mixed playlist with localStorage persistence.
- * Loads on mount, saves on every change.
- */
+import { useEffect, useMemo, useState } from 'react';
+import { clearPlaylist as clearPlaylistStorage, loadPlaylist, savePlaylist } from '../lib/storage';
+import type { PlaylistTrack } from '../types/music';
 
-import { useState, useEffect, useCallback } from 'react';
-import type { PlaylistTrack, UnifiedTrack } from '../types/music';
-import { loadPlaylist, savePlaylist } from '../lib/storage';
+function getTrackKey(track: Pick<PlaylistTrack, 'provider' | 'id'>): string {
+  return `${track.provider}:${track.id}`;
+}
 
 export function useLocalPlaylist() {
-  const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [playlist, setPlaylist] = useState<PlaylistTrack[]>(() => loadPlaylist());
 
-  // Load from localStorage on mount
   useEffect(() => {
-    setTracks(loadPlaylist());
-    setHydrated(true);
-  }, []);
+    savePlaylist(playlist);
+  }, [playlist]);
 
-  // Persist whenever tracks change (after initial load)
-  useEffect(() => {
-    if (!hydrated) return;
-    savePlaylist(tracks);
-  }, [tracks, hydrated]);
+  const playlistKeys = useMemo(() => new Set(playlist.map(getTrackKey)), [playlist]);
 
-  const addTrack = useCallback((track: UnifiedTrack) => {
-    setTracks((prev) => [...prev, track]);
-  }, []);
+  function addTrack(track: PlaylistTrack) {
+    const key = getTrackKey(track);
+    if (playlistKeys.has(key)) return;
+    setPlaylist((current) => [...current, track]);
+  }
 
-  const removeTrack = useCallback((index: number) => {
-    setTracks((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  function removeTrack(track: Pick<PlaylistTrack, 'provider' | 'id'>) {
+    const keyToRemove = getTrackKey(track);
+    setPlaylist((current) => current.filter((item) => getTrackKey(item) !== keyToRemove));
+  }
 
-  const clearPlaylist = useCallback(() => {
-    setTracks([]);
-  }, []);
-
-  const moveTrack = useCallback((fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-    setTracks((prev) => {
-      const next = [...prev];
-      const [removed] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, removed);
-      return next;
-    });
-  }, []);
+  function clearAll() {
+    setPlaylist([]);
+    clearPlaylistStorage();
+  }
 
   return {
-    tracks,
+    playlist,
     addTrack,
     removeTrack,
-    clearPlaylist,
-    moveTrack,
-    hydrated,
+    clearAll,
   };
 }

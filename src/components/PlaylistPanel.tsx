@@ -1,74 +1,46 @@
-/**
- * Right panel: current mixed playlist with add/remove/play controls.
- */
-
 import type { PlaylistTrack } from '../types/music';
 
 interface PlaylistPanelProps {
   tracks: PlaylistTrack[];
-  currentIndex: number;
-  onRemove: (index: number) => void;
-  onPlayTrack: (index: number) => void;
+  currentTrack: PlaylistTrack | null;
+  onSelect: (track: PlaylistTrack) => void;
+  onRemove: (track: PlaylistTrack) => void;
   onClear: () => void;
 }
 
-export function PlaylistPanel({
-  tracks,
-  currentIndex,
-  onRemove,
-  onPlayTrack,
-  onClear,
-}: PlaylistPanelProps) {
+export function PlaylistPanel({ tracks, currentTrack, onSelect, onRemove, onClear }: PlaylistPanelProps) {
   return (
-    <div className="playlist-panel">
-      <div className="playlist-panel-header">
-        <h2>Playlist</h2>
-        {tracks.length > 0 && (
-          <button type="button" className="btn btn-small btn-ghost" onClick={onClear}>
-            Clear all
-          </button>
+    <aside className="playlist-column panel">
+      <div className="playlist-header">
+        <div>
+          <h2>Mixed playlist</h2>
+          <p className="muted">{tracks.length} saved tracks</p>
+        </div>
+        <button className="button button-secondary" onClick={onClear} disabled={!tracks.length}>
+          Clear
+        </button>
+      </div>
+
+      <div className="playlist-list">
+        {tracks.length === 0 ? (
+          <p className="muted">Add tracks from Spotify or SoundCloud to build your playlist.</p>
+        ) : (
+          tracks.map((track) => {
+            const isActive = currentTrack?.provider === track.provider && currentTrack.id === track.id;
+            return (
+              <div key={`${track.provider}-${track.id}`} className={`playlist-item ${isActive ? 'playlist-item-active' : ''}`}>
+                <button className="playlist-select" onClick={() => onSelect(track)}>
+                  <strong>{track.title}</strong>
+                  <span>{track.artist}</span>
+                </button>
+                <button className="playlist-remove" onClick={() => onRemove(track)} aria-label={`Remove ${track.title}`}>
+                  ×
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
-      <ul className="playlist-list">
-        {tracks.length === 0 ? (
-          <li className="playlist-empty">Add tracks from search or SoundCloud samples.</li>
-        ) : (
-          tracks.map((track, index) => (
-            <li
-              key={`${track.provider}-${track.id}-${index}`}
-              className={`playlist-item ${index === currentIndex ? 'is-current' : ''}`}
-            >
-              <button
-                type="button"
-                className="playlist-item-main"
-                onClick={() => onPlayTrack(index)}
-              >
-                {track.artworkUrl ? (
-                  <img src={track.artworkUrl} alt="" className="playlist-item-artwork" />
-                ) : (
-                  <div className="playlist-item-artwork placeholder" />
-                )}
-                <div className="playlist-item-info">
-                  <span className="playlist-item-provider" data-provider={track.provider}>
-                    {track.provider}
-                  </span>
-                  <span className="playlist-item-title">{track.title}</span>
-                  <span className="playlist-item-artist">{track.artist}</span>
-                </div>
-              </button>
-              <button
-                type="button"
-                className="playlist-item-remove"
-                onClick={() => onRemove(index)}
-                title="Remove from playlist"
-                aria-label="Remove"
-              >
-                ×
-              </button>
-            </li>
-          ))
-        )}
-      </ul>
-    </div>
+    </aside>
   );
 }
